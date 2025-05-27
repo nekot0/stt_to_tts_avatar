@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Avatar</title>
+  <script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script> <!-- Speech SDK -->
+  <script src="https://aka.ms/avatarexamplesdk"></script> <!-- Avatar SDK -->
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: #f0f0f0;
+    }
+    #videoPlayer {
+      width: 640px;
+      height: 360px;
+      background: #000;
+      margin: 20px auto;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎤 リサです！よろしくお願いします！</h2>
+  <video id="videoPlayer" autoplay playsinline></video>
+
+  <script>
+    let avatarSynthesizer;
+
+    async function initializeAvatar() {
+      const subscriptionKey = "Subscription Key";
+      const region = "Region";
+      const voiceName = "ja-JP-AoiNeural";
+
+      const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(subscriptionKey, region);
+      speechConfig.speechSynthesisVoiceName = voiceName;
+
+      const avatarConfig = new SpeechSDK.AvatarConfig("lisa", "casual-sitting");
+
+      const avatarVideo = document.getElementById("videoPlayer");
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: ["iceServer URL"],
+            username: "iceServer Username",
+            credential: "iceServer Key"
+          }
+        ]
+      });
+
+      // unmute
+      avatarVideo.muted = false;
+      avatarVideo.volume = 1.0
+
+      peerConnection.ontrack = function (event) {
+        console.log("event:", event.track)
+        if (event.track.kind === 'video') {
+          avatarVideo.srcObject = event.streams[0];
+        }
+        if (event.track.kind === 'audio') {
+          const audio = document.createElement("audio");
+          const singleTrackStream = new MediaStream([event.track]);
+
+          audio.srcObject = event.streams[0];
+          audio.autoplay = true;
+          audio.controls = true;
+          audio.muted = false;
+          audio.volume = 1.0;
+          
+          document.body.appendChild(audio);
+        }
+      };
+
+      peerConnection.addTransceiver("video", { direction: "sendrecv" });
+      peerConnection.addTransceiver("audio", { direction: "sendrecv" });
+
+      avatarSynthesizer = new SpeechSDK.AvatarSynthesizer(speechConfig, avatarConfig);
+      await avatarSynthesizer.startAvatarAsync(peerConnection);
+      console.log("Avatar started.");
+    }
+
+    async function fetchTextLoop() {
+      // 1秒ごとにバックエンドからテキスト取得
+      setInterval(async () => {
+        const res = await fetch("http://localhost:5000/api/speak");
+        if (!res.ok) return;
+        const data = await res.json();
+        const text = data.text;
+        if (text && text.length > 0) {
+          console.log("Speaking: ", text);
+          await avatarSynthesizer.speakTextAsync(text);
+        }
+      }, 1000);
+    }
+
+    function startEventStream() {
+      const eventSource = new EventSource("http://localhost:5000/api/stream");
+      eventSource.onmessage = async function(event) {
+        const text = event.data;
+        if (text && text.length > 0) {
+          console.log("Speaking (via SSE):", text);
+          await avatarSynthesizer.speakTextAsync(text);
+        }
+      };
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      await initializeAvatar();
+      startEventStream();
+      //await fetchTextLoop(); // for fetch
+    });
+  </script>
+</body>
+</html>
